@@ -32,8 +32,7 @@ __device__ float Mul( float x , float y );
  * Out will be a vector with the dimension of the w.height which is the rows which corresponds to the neurons of the current level
  * Each thread is neuron of the current level
  * */
-//TODO REDUCE!!!!!!
-__global__ void Kernel( float *A ,  Matrix W , float *Out ) // vector_size = W.width
+__global__ void Kernel_forward( float *A ,  Matrix W , float *Out ) // vector_size = W.width
 {
 	int tx =  threadIdx.x;
 	float register sum = 0 ;
@@ -50,14 +49,38 @@ __global__ void Kernel( float *A ,  Matrix W , float *Out ) // vector_size = W.w
 	Out[tx]= (nonlin)? Sigmoid(sum) : TanSig(sum) ;
 
 }
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
+// reduced version of feedforward kernel up to 15x speedup
+__global__ void Kernel_forward_fast( float *A ,  Matrix W , float *Out )
+{
+	extern __shared__ float sdata[];
+	int bx = blockIdx.x ;
+	unsigned int tid =  threadIdx.x;
+	unsigned int i = blockIdx.x*(W.width)+ threadIdx.x;
+	sdata[tid] =  (W.elements[i])*A[tid];
+	__syncthreads();
+	//*******************
+	// REDUCE HERE IN SHARED MEMORY- full unroll of for loop - reduction in shared mem
+	if (W.width >= 512) { if (tid < 256) { sdata[tid] += sdata[tid + 256]; } __syncthreads(); }
+	if (W.width >= 256) { if (tid < 128) { sdata[tid] += sdata[tid + 128]; } __syncthreads(); }
+	if (W.width >= 128) { if (tid < 64) { sdata[tid] += sdata[tid + 64]; } __syncthreads(); }
+	if (tid < 32)
+	{
+		if (W.width >= 64) sdata[tid] += sdata[tid + 32];
+		if (W.width >= 32) sdata[tid] += sdata[tid + 16];
+		if (W.width >= 16) sdata[tid] += sdata[tid + 8];
+		if (W.width >= 8) sdata[tid] += sdata[tid + 4];
+		if (W.width >= 4) sdata[tid] += sdata[tid + 2];
+		if (W.width >= 2) sdata[tid] += sdata[tid + 1];
+	}
+	// write result for this block to global mem
+	if (tid == 0) Out[bx] = Sigmoid(sdata[0]);
+}
+
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 //-------------- classic Back Propagation Algorithm -----------------------------------
 /*
-/*kernel2 description
+/*Kernel_back_last description
  * A vector is the output of the previous level ,we need in order to change the weights of the last level
  * this kernel implements the back propagation for the output layer of the neural network
  * Desired is the vector with the target values , the ideal output
@@ -68,13 +91,11 @@ __global__ void Kernel( float *A ,  Matrix W , float *Out ) // vector_size = W.w
  * Delta_val is the delta values of each neuron , it resembles the error tha we back-probagate to the hidden layers , we do that in kernel 3!!!!!
  * */
 
-
-__global__ void Kernel2( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate )
+__global__ void Kernel_back_last( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate )
 {
     int tx =  threadIdx.x;
     float register DeltaW = 0 ;
     int register k ;
-
     float error = Out_ff[tx]-Desired[tx];
     float sigmoid_derivative= (nonlin)?  Sig_der( Out_ff[tx] ) :TanSig_der( Out_ff[tx] )  ;
     float register delta_neuron = error*sigmoid_derivative ;
@@ -92,7 +113,7 @@ __global__ void Kernel2( float *A ,  Matrix W , float *Out_ff , float *Desired ,
         W.elements[ tx*W.width + k] = w_new;
     }
 }
-/*kernel 3 description
+/*Kernel_back_hidden description
  * A vector is the output of the previous level ,we need in order to change the weights Delta_W of the current level
  * this kernel implements the back propagation for the output layer of the neural network
  * W is the weights of the current layer
@@ -100,10 +121,10 @@ __global__ void Kernel2( float *A ,  Matrix W , float *Out_ff , float *Desired ,
  * Out_current is the output of the current layer , vector
  * Out_next is the output of the next  layer , we need it in order to compute the delta values of the current level
  * Each thread is neuron of the current level
- * W_next is the updated values !!! ???????????
+ * W_next is the updated values
  *
  * */
-__global__ void Kernel3( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate  )
+__global__ void Kernel_back_hidden( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate  )
 {
     int tx =  threadIdx.x;
     float register DeltaW = 0 ;
@@ -122,7 +143,7 @@ __global__ void Kernel3( float *A , Matrix W , float *Out_current , Matrix W_nex
     Delta_current[tx] = out_derivative * temp ;//??????????????????????????????????????????????????????????????
 
 // in this point we know all the delta values of the current level and we back-propagate to the previous level changing the Weights of the current level
-// this procces is the same with the  kernel 2 loop
+// this procces is the same with the  Kernel_back_last loop
     float delta_neuron =  Delta_current[tx] ;
     float w_old , w_new, previous_level_output ;
 #pragma unroll
@@ -136,20 +157,13 @@ __global__ void Kernel3( float *A , Matrix W , float *Out_current , Matrix W_nex
         }
 }
 
-
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 //---------------------Resilient Backprobagation------------------------------
-// kernel 4 and 5
-
 
 
 //description TODO
-__global__ void Kernel4( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate , Matrix Grad_prev , Matrix Dij , Matrix DW_prev , int counter )
+__global__ void Kernel_resilient_last( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate , Matrix Grad_prev , Matrix Dij , Matrix DW_prev , int counter )
 {
 
 	int tx =  threadIdx.x;
@@ -201,7 +215,7 @@ __global__ void Kernel4( float *A ,  Matrix W , float *Out_ff , float *Desired ,
 //-----------------------------------------------------------------------
 
 
-__global__ void Kernel5( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate ,  Matrix Grad_prev , Matrix Dij , Matrix DW_prev  , int counter )
+__global__ void Kernel_relilient_hidden( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate ,  Matrix Grad_prev , Matrix Dij , Matrix DW_prev  , int counter )
 {
 	int tx =  threadIdx.x;
 	float register DeltaW = 0 ;
@@ -272,7 +286,7 @@ __global__ void Kernel5( float *A , Matrix W , float *Out_current , Matrix W_nex
 
 
 
-__global__ void Kernel_MOM2( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate ,int count , Matrix dW  )
+__global__ void Kernel_momentum_last( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate ,int count , Matrix dW  )
 {
     int tx =  threadIdx.x;
     float register DeltaW = 0 ;
@@ -298,7 +312,7 @@ __global__ void Kernel_MOM2( float *A ,  Matrix W , float *Out_ff , float *Desir
     }
 }
 
-__global__ void Kernel_MOM3( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate ,int count, Matrix dW   )
+__global__ void Kernel_momentum_hidden( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate ,int count, Matrix dW   )
 {
     int tx =  threadIdx.x;
     float register DeltaW = 0 ;
@@ -330,26 +344,12 @@ __global__ void Kernel_MOM3( float *A , Matrix W , float *Out_current , Matrix W
         }
 }
 
-
-
-
-
-
-
-
 //---------------------------------------------------------------
 //---------------------------------------------------------------
-//---------------------------------------------------------------
-//---------------------------------------------------------------
-//---------------------------------------------------------------
-//---------------------------------------------------------------
-
 //---------------------------------------------------------------
 //QUICK PROPAGATION
 
-
-
-__global__ void Kernel_QUICK2( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , Matrix DW_prev , Matrix Gradient)
+__global__ void Kernel_quick_last( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , Matrix DW_prev , Matrix Gradient)
 {
     int tx =  threadIdx.x;
     float register DeltaW = 0 ;
@@ -380,13 +380,12 @@ __global__ void Kernel_QUICK2( float *A ,  Matrix W , float *Out_ff , float *Des
     }
 }
 
-__global__ void Kernel_QUICK3( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , Matrix DW_prev , Matrix Gradient  )
+__global__ void Kernel_quick_hidden( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , Matrix DW_prev , Matrix Gradient  )
 {
     int tx =  threadIdx.x;
     float register DeltaW = 0 ;
     int register k ;
     float out_derivative,temp ;
-
 // here we implement the temp = Σ (  δ_next_level_k * W_next( threadIdx.x , k ) , where k is in the range 0-W_next.height
 #pragma unroll
     for(k=0 ; k < W_next.height  ; k++)
@@ -417,20 +416,9 @@ __global__ void Kernel_QUICK3( float *A , Matrix W , float *Out_current , Matrix
 		 Gradient.elements[ tx*W.width + k ] = grad_cur ;
      }
 }
-
-
-
-
-
-
-
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
-//----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
 //------------------------Device Helper Function Calls------------------------
-
 __device__ float  Calc_DeltaW_prev( float  grad , float Dij )
 {
     float dw = -1*Sign(grad)*Dij;
@@ -454,11 +442,8 @@ __device__ float Sig_der( float sigmoid_output )
 	return ( (s*(1-s))  ) ;
 }
 
-////////////////////////////////////////////////////
-
 __device__ float TanSig( float x )
 {
-	//return ( (1-expf((-2)*x))/(1+expf(2*x))  ) ;
 	return ((2)/(1+expf(-2*x))) -1 ;
 }
 
@@ -497,125 +482,3 @@ __device__ float Mul( float x , float y )
 	else if (x*y<(-1*th)) return -1;
 	else return 0 ;
 }
-
-
-
-
-
-
-/*
-__global__ void Kernel7( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate ,  Matrix Grad_prev , Matrix dW_prev )
-{
-    int tx =  threadIdx.x;
-    float register DeltaW = 0 ;
-    int register k ;
-
-    float error = Out_ff[tx]-Desired[tx];
-    float register sigmoid_derivative=  Sig_der( Out_ff[tx] )  ;
-    float register delta_neuron = error*sigmoid_derivative ;//eeeeeeeeeeeeeeee we must save this shit??????
-
-    Delta_val[tx] = delta_neuron ;
-
-    float register w_old , w_new, previous_level_output , gradient ;
-#pragma unroll
-    for(k=0 ; k<W.width  ; k++)
-    {
-        w_old = W.elements[ tx*W.width + k] ;
-        previous_level_output = ( ( k==(W.width-1) ) ? 1 :  A[k] )  ;
-        //previous_level_output =   A[k] ;
-        gradient =delta_neuron * previous_level_output ;
-        DeltaW = -1*gradient * lrate ;
-        w_new = w_old + DeltaW ;
-        W.elements[ tx*W.width + k] = w_new;
-        dW_prev.elements[ tx*W.width + k] = DeltaW ;
-        Grad_prev.elements[ tx*W.width + k] =  gradient ;
-    }
-}
-/*kernel 3 description
- * A vector is the output of the previous level ,we need in order to change the weights Delta_W of the current level
- * this kernel implements the back propagation for the output layer of the neural network
- * W is the weights of the current layer
- * W_next is the weights of the next layer , we need it in order to compute the delta values of the current level
- * Out_current is the output of the current layer , vector
- * Out_next is the output of the next  layer , we need it in order to compute the delta values of the current level
- * Each thread is neuron of the current level
- * W_next is the updated values !!! ???????????
- *
- * */
-
-
-/*
-
-__global__ void Kernel8( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate ,  Matrix Grad_prev , Matrix dW_prev  )
-{
-    int tx =  threadIdx.x;
-    float register DeltaW = 0 ;
-    int register k ;
-    float sigmoid_current_derivative,temp ;
-
-// here we implement the temp = Σ (  δ_next_level_k * W_next( threadIdx.x , k ) , where k is in the range 0-W_next.height
-#pragma unroll
-    for(k=0 ; k < W_next.height  ; k++)
-    {
-         temp = Delta_next[k] * W_next.elements[ k*W_next.width +  tx ] ;
-
-    }
-    sigmoid_current_derivative =   Sig_der( Out_current[tx]  ) ;
-
-    Delta_current[tx] = sigmoid_current_derivative * temp ;
-
-// in this point we know all the delta values of the current level and we back-propagate to the previous level changing the Weights of the current level
-// this procces is the same with the  kernel 2 loop
-    float delta_neuron =  Delta_current[tx] ;
-    float register w_old , w_new, previous_level_output , gradient ;
-#pragma unroll
-    for(k=0 ; k<W.width  ; k++)
-    {
-        w_old = W.elements[ tx*W.width + k] ;
-        previous_level_output = ( ( k==(W.width-1) ) ? 1 :  A[k] )  ;
-        //previous_level_output =   A[k] ;
-        gradient =delta_neuron * previous_level_output ;
-        DeltaW = -1*gradient * lrate ;
-        w_new = w_old + DeltaW ;
-        W.elements[ tx*W.width + k] = w_new;
-        dW_prev.elements[ tx*W.width + k] = DeltaW ;
-        Grad_prev.elements[ tx*W.width + k] =  gradient ;
-    }
-}
-
-//-----------------------------------------------------------------------------------
-//////////////////////////////////////////////////////////////////////////
-
-
-__global__ void Kernel99( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate  )
-{
-    int tx =  threadIdx.x;
-    float register DeltaW = 0 ;
-    int register k ;
-    float nonlinder,temp ;
-
-// here we implement the temp = Σ (  δ_next_level_k * W_next( threadIdx.x , k ) , where k is in the range 0-W_next.height
-    for(k=0 ; k < W_next.height  ; k++)
-    {
-         temp = Delta_next[k] * W_next.elements[ k*W_next.width +  tx ] ;
-
-    }
-    nonlinder =    (nonlin)?  Sig_der( Out_current[tx] ) :TanSig_der(Out_current[tx] )  ;
-    Delta_current[tx] = nonlinder * temp*100000 ;
-
-// in this point we know all the delta values of the current level and we back-propagate to the previous level changing the Weights of the current level
-// this procces is the same with the  kernel 2 loop
-    float delta_neuron =  (Delta_current[tx])/100000 ;
-    float w_old , w_new, previous_level_output ;
-#pragma unroll
-    for(k=0 ; k<W.width  ; k++)
-        {
-            w_old = W.elements[ tx*W.width + k] ;
-            previous_level_output =  (( k==(W.width-1) ) ? 1 :  A[k] )  ;
-            //previous_level_output = A[k]   ;
-            DeltaW = delta_neuron * previous_level_output*lrate ;
-            w_new = w_old - DeltaW;
-            W.elements[ tx*W.width + k] = w_new;
-        }
-}
-*/

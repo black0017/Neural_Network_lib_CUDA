@@ -13,11 +13,11 @@
 #define d0 0.1
 static const char *BPA_str[] = {   "CLASSIC",   "RESILIENT",   "ADAPTIVE",   "MOMENTUM",   "QUICK"};
 void printBPA(BPA e){   printf("BPA = %s\n", BPA_str[(std::size_t)e]);}
-
 //this value ensures that 'srand' is called only once
 static bool RandIsInitialized = false;
 //add bias neuron
 static bool Bias = true;
+
 
 //CUDA error check macro
 static void CheckCudaErrorAux (const char *, unsigned, const char *, cudaError_t);
@@ -253,7 +253,17 @@ float trainNNetwork(NNState *state, float *input, float *desired , int iteration
 	for ( i = 0 ; i < (state->levels); i++)
 	{
 		neurons = state->neurons[i] ;
-		Kernel<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+		if ( isPowOf2(state->d_W[i].width)  )
+		{
+			//optimized kernel - reduction
+			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
+		}
+		else
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		}
+
 		cudaDeviceSynchronize();
 	}
 //copy back results to cpu to calculate error when needed
@@ -271,11 +281,11 @@ float trainNNetwork(NNState *state, float *input, float *desired , int iteration
 		neurons = state->neurons[i]   ;
 		if (i == OUTPUT_LAYER )
 		{
-			Kernel2<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate  ) ;
+			Kernel_back_last<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate  ) ;
 		}
 		else
 		{
-			Kernel3<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]  , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate	) ;
+			Kernel_back_hidden<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]  , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate	) ;
 		}
 		cudaDeviceSynchronize();
 	}
@@ -299,7 +309,17 @@ float trainNNetwork_momentum(NNState *state, float *input,  float *desired , int
 	for ( i = 0 ; i < (state->levels); i++)
 	{
 		neurons = state->neurons[i] ;
-		Kernel<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+		if ( isPowOf2(state->d_W[i].width)  )
+		{
+			//optimized kernel - reduction
+			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
+		}
+		else
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		}
+
 		cudaDeviceSynchronize();
 	}
 //copy back results to cpu to calculate error when needed
@@ -317,20 +337,17 @@ float trainNNetwork_momentum(NNState *state, float *input,  float *desired , int
 		neurons = state->neurons[i]   ;
 		if (i == OUTPUT_LAYER )
 		{
-			Kernel_MOM2<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate ,iteration ,  state->dW_prev[i] ) ;
+			Kernel_momentum_last<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate ,iteration ,  state->dW_prev[i] ) ;
 		}
 		else
 		{
-			Kernel_MOM3<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]  , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate, iteration , state->dW_prev[i]) ;
+			Kernel_momentum_hidden<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]  , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate, iteration , state->dW_prev[i]) ;
 		}
 		cudaDeviceSynchronize();
 	}
 	cudaDeviceSynchronize();
 	return total_error ;
-
-
 }
-
 
 float trainNNetwork_resilient(NNState *state, float *input,  float *desired , int iteration )
 {
@@ -346,17 +363,25 @@ float trainNNetwork_resilient(NNState *state, float *input,  float *desired , in
 	for ( i = 0 ; i < (state->levels); i++)
 	{
 		neurons = state->neurons[i] ;
-		Kernel<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+		if ( isPowOf2(state->d_W[i].width)  )
+		{
+			//optimized kernel - reduction
+			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
+		}
+		else
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		}
 		cudaDeviceSynchronize();
 	}
-//copy back results to cpu to calculate error when needed
+
 	if ( iteration%(state->sampling) == 0)
 	{
 		cudaMemcpy( state->ffout[OUTPUT_LAYER] , state->d_Out_ff[OUTPUT_LAYER], state->neurons[OUTPUT_LAYER]*(sizeof(float)) , cudaMemcpyDeviceToHost);
 		cudaDeviceSynchronize();
 		total_error  = SError_vec(  state->ffout[ OUTPUT_LAYER  ] , desired , state->neurons[ OUTPUT_LAYER ] );
 	}
-	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// 3. Back propagation Kernels call here
 	float Lrate = state->lrate ;
 	for ( i = OUTPUT_LAYER ;    i != SIZE_MAX    ; i--) //
@@ -364,11 +389,11 @@ float trainNNetwork_resilient(NNState *state, float *input,  float *desired , in
 		neurons = state->neurons[i]   ;
 		if (i == OUTPUT_LAYER )
 		{
-			Kernel4<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate , state->d_Grad[i] ,state->d_dij_prev[i] , state->dW_prev[i], iteration ) ;
+			Kernel_resilient_last<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate , state->d_Grad[i] ,state->d_dij_prev[i] , state->dW_prev[i], iteration ) ;
 		}
 		else
 		{
-			Kernel5<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]
+			Kernel_relilient_hidden<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]
 									    , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate , state->d_Grad[i] , state->d_dij_prev[i] ,  state->dW_prev[i] , iteration	) ;
 		}
 		cudaDeviceSynchronize();
@@ -391,7 +416,15 @@ float trainNNetwork_quick(NNState *state, float *input,  float *desired , int it
 	for ( i = 0 ; i < (state->levels); i++)
 	{
 		neurons = state->neurons[i] ;
-		Kernel<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		if ( isPowOf2(state->d_W[i].width)  )
+		{
+			//optimized kernel - reduction
+			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
+		}
+		else
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		}
 		cudaDeviceSynchronize();
 	}
 //copy back results to cpu to calculate error when needed
@@ -408,11 +441,11 @@ float trainNNetwork_quick(NNState *state, float *input,  float *desired , int it
 		neurons = state->neurons[i]   ;
 		if (i == OUTPUT_LAYER )
 		{
-			Kernel_QUICK2<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , state->dW_prev[i], state->d_Grad[i] ) ;
+			Kernel_quick_last<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , state->dW_prev[i], state->d_Grad[i] ) ;
 		}
 		else
 		{
-			Kernel_QUICK3<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]
+			Kernel_quick_hidden<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]
 									    , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,state->dW_prev[i], state->d_Grad[i] 	) ;
 		}
 		cudaDeviceSynchronize();
@@ -439,13 +472,19 @@ float trainNNetwork_old(NNState *state, float *input, size_t input_len, float *d
 		CUDA_CHECK_RETURN(cudaMemcpy(state->d_W[i].elements, state->weights[i]->elements, sizeW,cudaMemcpyHostToDevice));
 		neurons = state->neurons[i] ;
 		vector_out_bytes = (neurons)*(sizeof(float)) ;
-
-		Kernel<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		if ( isPowOf2(state->d_W[i].width)  )
+		{
+			//optimized kernel - reduction
+			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
+		}
+		else
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		}
 		cudaDeviceSynchronize();
 		cudaMemcpy( state->ffout[i] , state->d_Out_ff[i], vector_out_bytes , cudaMemcpyDeviceToHost);
 	}
 	cudaDeviceSynchronize();
-
 	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	// 3. Back propagation Kernels call here
 	float Lrate = state->lrate ;
@@ -459,12 +498,12 @@ float trainNNetwork_old(NNState *state, float *input, size_t input_len, float *d
 
 		if (i == OUTPUT_LAYER )
 		{
-			Kernel2<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate ) ;
+			Kernel_back_last<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate ) ;
 		}
 		else
 		{
 
-			Kernel3<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]
+			Kernel_back_hidden<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]
 						    , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate	) ;
 		}
 		cudaDeviceSynchronize();
@@ -578,10 +617,7 @@ void copyDataToCpu( NNState *state   )
 				break;
 			}
 			case CLASSIC:break;
-
-
 			}
-
 		}
 		cudaDeviceSynchronize();
 }
@@ -599,7 +635,16 @@ float evalNN(NNState *state, float *input, size_t input_len , int desired   )
 		CUDA_CHECK_RETURN(cudaMemcpy(state->d_W[i].elements, state->weights[i]->elements, sizeW,cudaMemcpyHostToDevice));// auto prepei na ginetai kathe fora
 		neurons = state->neurons[i] ;
 		vector_out_bytes = (neurons)*(sizeof(float)) ;
-		Kernel<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		if ( isPowOf2(state->d_W[i].width)  )
+		{
+			//optimized kernel - reduction
+			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
+		}
+		else
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+		}
+
 		cudaDeviceSynchronize();
 		cudaMemcpy( state->ffout[i] , state->d_Out_ff[i], vector_out_bytes , cudaMemcpyDeviceToHost);
 	}
@@ -607,7 +652,7 @@ float evalNN(NNState *state, float *input, size_t input_len , int desired   )
 
 
 	int pos = vectorMax(  state->ffout[OUTPUT_LAYER] ,state->neurons[OUTPUT_LAYER] ) ;
-	// POS IS IN RANGE 0- OUT_NEURONS-1
+	// POS IS IN RANGE 0- OUTnEURONS-1
 
 	if ( pos == desired )
 	{
@@ -755,5 +800,11 @@ void showInfo( NNState *state , int instances  )
 
 	}
 	printf("-------------------\n");
+
+}
+unsigned int isPowOf2(unsigned int x)
+{
+	// returns 1 when x is power of two
+	return !(x & (x - 1));
 
 }

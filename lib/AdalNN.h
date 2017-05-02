@@ -89,7 +89,7 @@ void freeNNState(NNState *state);
 
 void copyDataToGpu( NNState *state ) ;
 void copyDataToCpu( NNState *state   );
-
+unsigned int isPowOf2(unsigned int x);
 float trainNNetwork(NNState *state, float *input,  float *target , int iteration  );
 float trainNNetwork_momentum(NNState *state, float *input,  float *target , int iteration  );
 float trainNNetwork_resilient(NNState *state, float *input,  float *target , int iteration );
@@ -99,10 +99,12 @@ float trainNNetwork_old(NNState *state, float *input, size_t input_len, float *d
 
 float evalNN( NNState *state, float *input, size_t input_len ,  int desired ) ;
 
+
 void dbgPrintNNState(NNState *state);
 void dbgPrintNNState2(NNState *state);
 void dbgPrintNNState3(NNState *state);
 void showInfo( NNState *state , int instances  ) ;
 int NNvar(NNState *state) ;
 void printBPA(BPA e);
+
 #endif /* ADALNN_H_ */

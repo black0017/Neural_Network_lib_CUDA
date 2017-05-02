@@ -16,8 +16,8 @@
 
 typedef struct
 {
-	int width;
-	int height;
+	unsigned int width;
+	unsigned int height;
 	float* elements;
 } Matrix;
 
