@@ -295,6 +295,85 @@ float trainNNetwork(NNState *state, float *input, float *desired , int iteration
 }
 
 
+float trainNNetwork_test(NNState *state, float *input, float *desired , int iteration  )
+{
+	size_t vector_in_bytes =  ((state->weights[0]->width)-1)* (sizeof(float)); // width -1 for bias
+	CUDA_CHECK_RETURN(cudaMemcpy(state->d_input_vec, input , vector_in_bytes ,cudaMemcpyHostToDevice));
+	size_t target_bytes =  (state->neurons[OUTPUT_LAYER])* (sizeof(float));
+	CUDA_CHECK_RETURN(cudaMemcpy(state->d_desired, desired, target_bytes ,cudaMemcpyHostToDevice));
+
+	//2.Feedforward kernel calls  that executed serially
+	size_t i, neurons ;
+	float total_error=-1 ;
+	unsigned int threadsPerBlock;
+	cudaDeviceSynchronize();
+	for ( i = 0 ; i < (state->levels); i++)
+	{
+		neurons = state->neurons[i] ;
+//////////////////////////////////////////////////////////////////////////////
+		if ( (state->d_W[i].width)<8  )
+		{
+			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+		}
+		else if ( (state->d_W[i].width)>=8 && (state->d_W[i].width)<128   )
+		{
+			//zero padding
+			threadsPerBlock = nextPowOf2( state->d_W[i].width ) ;
+			Kernel_forward_fast2<<< neurons , threadsPerBlock , (threadsPerBlock*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+		}
+		else if(  ((state->d_W[i].width)>=128 && (state->d_W[i].width)<=2048)   )
+		{
+			if ( isEven(state->d_W[i].width)  )
+			{
+				//zero padding with first add during load and half threads
+				threadsPerBlock = (nextPowOf2( state->d_W[i].width))/2 ;
+				Kernel_forward_fast3<<< neurons , threadsPerBlock , (threadsPerBlock*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+			}
+			else if ((state->d_W[i].width)<1023)
+			{
+				// WARNING TO CHANGE NUMBER OF NEURONS
+				threadsPerBlock = nextPowOf2( state->d_W[i].width ) ;
+				Kernel_forward_fast2<<< neurons , threadsPerBlock , (threadsPerBlock*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+			}
+		}
+///////////////////////////////////////////////
+
+		cudaDeviceSynchronize();
+	}
+//copy back results to cpu to calculate error when needed
+	if ( iteration%(state->sampling) == 0)
+	{
+		cudaMemcpy( state->ffout[OUTPUT_LAYER] , state->d_Out_ff[OUTPUT_LAYER], state->neurons[OUTPUT_LAYER]*(sizeof(float)) , cudaMemcpyDeviceToHost);
+		cudaDeviceSynchronize();
+		total_error  = SError_vec(  state->ffout[ OUTPUT_LAYER  ] , desired , state->neurons[ OUTPUT_LAYER ] );
+	}
+	//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	// 3. Back propagation Kernels call here
+	float Lrate = state->lrate ;
+	for ( i = OUTPUT_LAYER ;    i != SIZE_MAX    ; i--) //
+	{
+		neurons = state->neurons[i]   ;
+		if (i == OUTPUT_LAYER )
+		{
+			Kernel_back_last<<< 1 , neurons >>>( state->d_Out_ff[i-1] ,  state->d_W[i] , state->d_Out_ff[i] , state->d_desired , state->d_delta_val[i]   , Lrate  ) ;
+		}
+		else
+		{
+			Kernel_back_hidden<<< 1, neurons >>>(  ( (i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i]  , state->d_Out_ff[i] , state->d_W[i+1]  , state->d_Out_ff[i+1] , state->d_delta_val[i]  , 	 state->d_delta_val[i+1] ,  Lrate	) ;
+		}
+		cudaDeviceSynchronize();
+	}
+	cudaDeviceSynchronize();
+	return total_error ;
+
+}
+
+
+
+
+
 float trainNNetwork_momentum(NNState *state, float *input,  float *desired , int iteration  )
 {
 	size_t vector_in_bytes =  ((state->weights[0]->width)-1)* (sizeof(float)); // width -1 for bias
@@ -635,15 +714,37 @@ float evalNN(NNState *state, float *input, size_t input_len , int desired   )
 		CUDA_CHECK_RETURN(cudaMemcpy(state->d_W[i].elements, state->weights[i]->elements, sizeW,cudaMemcpyHostToDevice));// auto prepei na ginetai kathe fora
 		neurons = state->neurons[i] ;
 		vector_out_bytes = (neurons)*(sizeof(float)) ;
-		if ( isPowOf2(state->d_W[i].width)  )
-		{
-			//optimized kernel - reduction
-			Kernel_forward_fast<<< neurons ,state->d_W[i].width , (state->d_W[i].width*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ) , state->d_W[i] , state->d_Out_ff[i]  ) ;
-		}
-		else
-		{
-			Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
-		}
+		int threadsPerBlock ;
+
+		//////////////////////////////////////////////////////////////////////////////
+				if ( (state->d_W[i].width)<8  )
+				{
+					Kernel_forward<<< 1 , neurons  >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+				}
+				else if ( (state->d_W[i].width)>=8 && (state->d_W[i].width)<128   )
+				{
+					//zero padding
+					threadsPerBlock = nextPowOf2( state->d_W[i].width ) ;
+					Kernel_forward_fast2<<< neurons , threadsPerBlock , (threadsPerBlock*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+
+				}
+				else if(  ((state->d_W[i].width)>=128 && (state->d_W[i].width)<=2048)   )
+				{
+					if ( isEven(state->d_W[i].width)  )
+					{
+						//zero padding with first add during load and half threads
+						threadsPerBlock = (nextPowOf2( state->d_W[i].width))/2 ;
+						Kernel_forward_fast3<<< neurons , threadsPerBlock , (threadsPerBlock*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+					}
+					else if ((state->d_W[i].width)<1023)
+					{
+						// WARNING TO CHANGE NUMBER OF NEURONS
+						threadsPerBlock = nextPowOf2( state->d_W[i].width ) ;
+						Kernel_forward_fast2<<< neurons , threadsPerBlock , (threadsPerBlock*sizeof(float)) >>>( (	(i==0)? state->d_input_vec : state->d_Out_ff[i-1]  ), state->d_W[i] ,  state->d_Out_ff[i] ) ;
+					}
+				}
+		///////////////////////////////////////////////
 
 		cudaDeviceSynchronize();
 		cudaMemcpy( state->ffout[i] , state->d_Out_ff[i], vector_out_bytes , cudaMemcpyDeviceToHost);
@@ -807,4 +908,21 @@ unsigned int isPowOf2(unsigned int x)
 	// returns 1 when x is power of two
 	return !(x & (x - 1));
 
+}
+unsigned int isEven(unsigned int x)
+{
+	unsigned int k = x%2==0?1:0 ;
+	return k;
+
+}
+
+int nextPowOf2( int x)
+{
+	if ( !(x & (x - 1)) ) return x ; // is power of 2
+	int power = 4 ;
+	while ( power<x )
+	{
+		power*=2 ; // next power of two
+	}
+	return power ;
 }

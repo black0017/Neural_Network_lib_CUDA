@@ -50,13 +50,19 @@ __global__ void Kernel_forward( float *A ,  Matrix W , float *Out ) // vector_si
 
 }
 // reduced version of feedforward kernel up to 15x speedup
+// the number of blocks is the number of neurons
+// the number of threads is the number weights for each neuron
+// block_dimension.X is the number of threds
 __global__ void Kernel_forward_fast( float *A ,  Matrix W , float *Out )
 {
 	extern __shared__ float sdata[];
 	int bx = blockIdx.x ;
 	unsigned int tid =  threadIdx.x;
 	unsigned int i = blockIdx.x*(W.width)+ threadIdx.x;
-	sdata[tid] =  (W.elements[i])*A[tid];
+
+	register float temp = (tid==W.width-1)? 1 :A[tid] ;// for bias neuron
+
+	sdata[tid] =  (W.elements[i])*temp;
 	__syncthreads();
 	//*******************
 	// REDUCE HERE IN SHARED MEMORY- full unroll of for loop - reduction in shared mem
@@ -72,6 +78,82 @@ __global__ void Kernel_forward_fast( float *A ,  Matrix W , float *Out )
 		if (W.width >= 4) sdata[tid] += sdata[tid + 2];
 		if (W.width >= 2) sdata[tid] += sdata[tid + 1];
 	}
+	// write result for this block to global mem
+	if (tid == 0) Out[bx] =  (nonlin)? Sigmoid(sdata[0]) : TanSig(sdata[0]) ;
+}
+// reduced version of feedforward kernel up to 15x speedup
+// the number of blocks is the number of neurons
+// the number of threads is the PADDED number of weights for each neuron . padded extra threads to be power of 2
+//this kernel does the Zero Padding !!!
+__global__ void Kernel_forward_fast2( float *A ,  Matrix W , float *Out )
+{
+	extern __shared__ float sdata[];
+	int bx = blockIdx.x ;
+	unsigned int tid =  threadIdx.x;
+	unsigned int i = blockIdx.x*(W.width)+ threadIdx.x;
+	register float temp ;
+	///////////////////////////////////////////////////////////////
+	if ( tid<=(W.width-1) )
+	{
+		temp = (tid==W.width-1)? 1 :A[tid] ; // 1 for bias neuron
+		sdata[tid] =  (W.elements[i])*temp;
+	}
+	else
+	{
+		sdata[tid] = 0 ; // padding in order to be power of 2
+	}
+	__syncthreads();
+	//******************* blockDim.x is power of 2 , Not W.width !!!!!!!
+	// REDUCE HERE IN SHARED MEMORY- full unroll of for loop - reduction in shared mem
+	if (blockDim.x >= 512) { if (tid < 256) { sdata[tid] += sdata[tid + 256]; } __syncthreads(); }
+	if (blockDim.x >= 256) { if (tid < 128) { sdata[tid] += sdata[tid + 128]; } __syncthreads(); }
+	if (blockDim.x >= 128) { if (tid < 64) { sdata[tid] += sdata[tid + 64]; } __syncthreads(); }
+	if (tid < 32)
+	{
+		if (blockDim.x >= 64) sdata[tid] += sdata[tid + 32];
+		if (blockDim.x >= 32) sdata[tid] += sdata[tid + 16];
+		if (blockDim.x >= 16) sdata[tid] += sdata[tid + 8];
+		if (blockDim.x >= 8) sdata[tid] += sdata[tid + 4];
+		if (blockDim.x >= 4) sdata[tid] += sdata[tid + 2];
+		if (blockDim.x >= 2) sdata[tid] += sdata[tid + 1];
+	}
+	// write result for this block to global mem
+	if (tid == 0) Out[bx] =  (nonlin)? Sigmoid(sdata[0]) : TanSig(sdata[0]) ;
+}
+// special case
+//only for even(artio) size of W.width and bigger than 128!!!!!! limit up until 2048 input vector
+__global__ void Kernel_forward_fast3( float *A ,  Matrix W , float *Out )
+{
+	extern __shared__ float sdata[];
+	int bx = blockIdx.x ;
+	unsigned int tid =  threadIdx.x;
+	unsigned int i = blockIdx.x*(W.width)+ threadIdx.x*2;
+	if ( 2*tid<(W.width) )
+	{
+		float temp1 = ((2*tid)==W.width-1)? 1 :A[tid] ; // 1 for bias neuron
+		float temp2 = ((2*tid+1)==W.width-1)? 1 :A[tid+1] ; // 1 for bias neuron
+		sdata[tid] =  ((W.elements[i])*temp1)+((W.elements[i+1])*temp2); // first reduction add during load
+	}
+	else
+	{
+		sdata[tid] = 0 ; // padding in order to be power of 2 for reduction
+	}
+	__syncthreads();
+	//******************* blockDim.x is power of 2 , Not W.width !!!!!!!
+	// REDUCE HERE IN SHARED MEMORY- full unroll of for loop - reduction in shared mem
+	if (blockDim.x >= 512) { if (tid < 256) { sdata[tid] += sdata[tid + 256]; } __syncthreads(); }
+	if (blockDim.x >= 256) { if (tid < 128) { sdata[tid] += sdata[tid + 128]; } __syncthreads(); }
+	if (blockDim.x >= 128) { if (tid < 64) { sdata[tid] += sdata[tid + 64]; } __syncthreads(); }
+	if (tid < 32)
+	{
+		if (blockDim.x >= 64) sdata[tid] += sdata[tid + 32];
+		if (blockDim.x >= 32) sdata[tid] += sdata[tid + 16];
+		if (blockDim.x >= 16) sdata[tid] += sdata[tid + 8];
+		if (blockDim.x >= 8) sdata[tid] += sdata[tid + 4];
+		if (blockDim.x >= 4) sdata[tid] += sdata[tid + 2];
+		if (blockDim.x >= 2) sdata[tid] += sdata[tid + 1];
+	}
+	__syncthreads();
 	// write result for this block to global mem
 	if (tid == 0) Out[bx] = Sigmoid(sdata[0]);
 }
