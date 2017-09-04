@@ -1,7 +1,7 @@
 #include <AdalNN.h>
 #include "read_file.h"
 #include <time.h>
-
+#define randf(low, high) ((rand()/(double)(RAND_MAX))*abs(low-high)+low)
 #define ARRAYLEN(x)  (sizeof(x)/sizeof(x[0]))
 
 int main(int argc, char **argv)
@@ -14,11 +14,13 @@ int main(int argc, char **argv)
 	//float target1[]={1,0,0}, target2[]={0,1,0} ,target3[]={0,0,1} ;
 	float target1[]={1,-1,-1}, target2[]={-1,1,-1} ,target3[]={-1,-1,1} ;
 	size_t  p ;
-	int max_epo= 100, input_vec_len = 13;
-	float min_error = 100 , percentage= 0 , error ,  learnRate= 0.01  ;
+	int max_epo= 20000, input_vec_len = 13;
+	int sampling=1;
+	float threshold = 0.0002 ;
+	float min_error = 100 , percentage= 0 , error ,  learnRate = 0.01 ;  //0.01  ;
+	int train_set = ((int)(max_rows*0.5)) ;
 
-
-	FILE *nn_data_file = fopen("wine.data", "r");
+	FILE *nn_data_file = fopen("wine_random.data", "r");
 
 	 if (nn_data_file)
 	 {
@@ -49,7 +51,6 @@ int main(int argc, char **argv)
 	        fclose(nn_data_file);
 	    }
 	 edit_array(&B[0][0] ,input_vec_len , max_rows ) ;
-
 	 //print_arrayHeader( &B[0][0] ,max_cols-1 , max_rows);
 	 //print_array( &B[0][0] ,max_cols-1 , max_rows );
 	 //vectorPrintINT(T,max_rows);
@@ -61,58 +62,64 @@ int main(int argc, char **argv)
 	 // input vector must be the size of variable input_vec_len
 	 // target vector must be the size of last level
 
-	 //print all parameters
-	NNState *neuralNet = initNNState( input_vec_len,  learnRate , 10000 , 10 , RESILIENT ,  2 ,10, 3 ) ;
+	NNState *neuralNet = initNNState( input_vec_len,  learnRate , max_epo , sampling , CLASSIC ,  2 ,12, 3 ) ;
 	printf("numOfWeights = %d  \n", NNvar(neuralNet ) ) ;
 	showInfo( neuralNet , max_rows );
 	copyDataToGpu( neuralNet ) ;//weights
-	for (int i =0 ; i<max_epo ; i++)
+	int i ;
+	for ( i =0 ; i<max_epo ; i++)
 	{
-		p = rand()%max_rows ;
+		p = rand()%train_set;
+
 		switch ( (int)T[p] )
 		{
 		case 1:
-			//error = trainNNetwork( neuralNet, &B[p][0], target1 , i );
-			error = trainNNetwork_resilient( neuralNet, &B[p][0],  target1 , i );
+			error = trainNNetwork_test( neuralNet, &B[p][0], target1 , i );
+			//error = trainNNetwork_resilient( neuralNet, &B[p][0],  target1 , i );
 			break;
 		case 2:
-			//error = trainNNetwork( neuralNet, &B[p][0], target2 , i );
-			error = trainNNetwork_resilient( neuralNet, &B[p][0],  target2 , i );
+			error = trainNNetwork_test( neuralNet, &B[p][0], target2 , i );
+			//error = trainNNetwork_resilient( neuralNet, &B[p][0],  target2 , i );
 			break;
 		case 3:
-			//error = trainNNetwork( neuralNet, &B[p][0], target3 , i );
-			error = trainNNetwork_resilient( neuralNet, &B[p][0],  target3 , i );
+			error = trainNNetwork_test( neuralNet, &B[p][0], target3 , i );
+			//error = trainNNetwork_resilient( neuralNet, &B[p][0],  target3 , i );
 			break;
 		}
-		if ((i%200)==0)
+/*
+		if (!(i%neuralNet->sampling)  )
 		{
 			if( error < min_error )
 			{
 				min_error  = error ;
-				printf("iteration %d  , error=%f\n", i , min_error );
-				if (min_error <= 0.01)
+				//printf("iteration %d  , error=%f\n", i , min_error );
+
+				if (min_error <=  threshold)
 					{
-					printf("------stoppedddd1111 ----------\n" ) ;
-					printf("------stoppedddd1111 ----------\n" ) ;
+					printf("------stopped----------\n" ) ;
 					break ;
 					}
+
 			}
 		}
+		*/
+
 	}
-	printf("Done training ! min_error = %f \t currentERROR = %f \n" , min_error  , error) ;
+	printf("Done training at i = %d ! min_error = %f \t currentERROR = %f \n" ,i, min_error  , error) ;
 	copyDataToCpu( neuralNet ) ;
 	//dbgPrintNNState(neuralNet);
 	printf("-------Evaluation Test for AdalNN --------------------------------\n" ) ;
 
 	int idx;
-	for (size_t i =0 ; i<max_rows ; i++)
+	for (size_t i = train_set ; i<max_rows ; i++)
 	{
 		idx=T[i]-1 ; //range 0 -2
 		percentage += evalNN( neuralNet, &B[i][0], input_vec_len , idx);
 	}
-	percentage = (percentage/max_rows)*100;
+	int number = percentage;
+	percentage = (percentage/(max_rows-train_set))*100;
 	printf( "\n ------------------ \n  "   ) ;
-	printf( "\n %f percentage\n  " , percentage   ) ;
+	printf( "\n %f percentage\n number %d \n" , percentage , number  ) ;
 	freeNNState(neuralNet);
 	time_t STOP;
 	STOP = time(NULL);

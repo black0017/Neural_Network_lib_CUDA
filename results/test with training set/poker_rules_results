@@ -1,0 +1,25 @@
+----NN parameters----
+
+25010 instances used for training 
+1795 weights  
+Lrate = 0.030  
+Max_epochs = 30000  
+BPA = CLASSIC
+Level 1 with 128 neurons   
+Level 2 with 3 neurons   
+----------------------------------------
+iteration 0  , error=0.830254
+iteration 100  , error=0.372562
+iteration 200  , error=0.011721
+iteration 2900  , error=0.002979
+iteration 11900  , error=0.002680
+---------------------------------------
+Done training at iteration 30000  
+
+Min_error = 0.002680
+
+-------VaLidation Test with training examples for AdalNN --------------------------------
+
+12587 correct out of 25010 
+50.327866 success percentage
+  TOTAL TIME = 12 SECONDS

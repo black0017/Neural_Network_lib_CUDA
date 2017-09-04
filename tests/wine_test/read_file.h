@@ -110,5 +110,3 @@ void edit_array( float *A, size_t width, size_t height)
 
 }
 
-
-
