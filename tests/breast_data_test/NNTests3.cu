@@ -14,8 +14,8 @@ int main(int argc, char **argv)
 	float B[600][30] ;
 	char T[600];
 	size_t  p ;
-	int max_epo= 15000, input_vec_len = 30 , sampling=1;
-	float min_error = 100 , percentage= 0 , error ,  learnRate = 0.001 , threshold = 0.0001;
+	int max_epo= 6000, input_vec_len = 30 , sampling=25 ;
+	float min_error = 100 , percentage= 0 , error ,  learnRate = 0.01 , threshold = 0.00001;
 	printf("starting . . . .\n") ;
 	FILE *nn_train_data = fopen("breast_randomized.txt", "r");
 	float target1[] = { 1 , -1 } ;
@@ -61,12 +61,12 @@ int main(int argc, char **argv)
 	 edit_array(&B[0][0] ,input_vec_len , max_rows ) ;
 	 print_arrayHeader( &B[0][0] ,input_vec_len , max_rows);
 //NNState *initNNState( int input_vec_len, float Lrate ,size_t max_iter , int sampling  , BPA variant ,  size_t levels, ... );
-	NNState *neuralNet1 = initNNState( input_vec_len,  learnRate , max_epo , sampling ,  CLASSIC , 2 , 12 ,  CLASSES ) ;
+	NNState *neuralNet1 = initNNState( input_vec_len,  learnRate , max_epo , sampling ,  CLASSIC , 2 , 16 ,  CLASSES ) ;
 	showInfo(neuralNet1 ,max_rows  );
 	copyDataToGpu( neuralNet1 ) ;//weights
 // training
 	int i ;
-	int trainset =  max_rows*0.5;
+	int trainset =  max_rows*0.8 ;
 	for (i =0 ; i<max_epo ; i++)
 	{
 		p = rand()%trainset ;
@@ -74,29 +74,22 @@ int main(int argc, char **argv)
 		switch ( T[p] )
 				{
 				case 'M':
-					//error = trainNNetwork_old( neuralNet1, &B[p][0], input_vec_len, target1 );
-					//error = trainNNetwork( neuralNet1, &B[p][0], target1 , i );
-					//error = trainNNetwork_MOM( neuralNet1, &B[p][0], target1 , i );
-					//error = trainNNetwork_resilient( neuralNet1, &B[p][0],  target1, i );
-					error = trainNNetwork_test( neuralNet1, &B[p][0], target1 , i );
-					//error = trainNNetwork_quick( neuralNet1, &B[p][0], target1 , i );
+					//error = trainNNetwork_test( neuralNet1, &B[p][0], target1 , i );
+					error = trainNNetwork_final( neuralNet1, &B[p][0], target1 , i );
 					break;
 				case 'B':
-					//error = trainNNetwork_old( neuralNet1, &B[p][0], input_vec_len, target2  );
-					//error = trainNNetwork( neuralNet1, &B[p][0], target2 , i );
-					//error = trainNNetwork_MOM( neuralNet1, &B[p][0], target2 , i );
-					//error = trainNNetwork_resilient( neuralNet1, &B[p][0],  target2 , i );
-					error = trainNNetwork_test( neuralNet1, &B[p][0], target2 , i );
-					//error = trainNNetwork_quick( neuralNet1, &B[p][0], target2 , i );
+					error = trainNNetwork_final( neuralNet1, &B[p][0], target2 , i );
+					//error = trainNNetwork_test( neuralNet1, &B[p][0], target2 , i );
 					break;
 				}
 
 		if (!(i%neuralNet1->sampling)  )
 		{
+			printf("iteration   %d   , error=  %f\n", i , error );
 			if( error < min_error )
 			{
 				min_error  = error ;
-				printf("iteration %d  , error=%f\n", i , min_error );
+				//printf("iteration   %d   , error=  %f\n", i , min_error );
 				if (min_error <= threshold )
 					{
 					printf("------stoppedddd1111 ----------\n" ) ;
@@ -106,7 +99,6 @@ int main(int argc, char **argv)
 			}
 
 		}
-
 
 
 
@@ -130,6 +122,7 @@ int main(int argc, char **argv)
 	int num = percentage ;
 	percentage = (percentage/(max_rows-trainset))*100;
 	printf( "\n%f percentage\n num= %d out of %d \n " , percentage , num  , (max_rows-trainset) ) ;
+	printf( "\n %d out of %d (  %2.2f % )\n " ,  num  , (max_rows-trainset) , percentage ) ;
 	freeNNState(neuralNet1);
 	time_t STOP;
 	STOP = time(NULL);

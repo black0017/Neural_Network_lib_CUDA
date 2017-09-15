@@ -14,11 +14,11 @@ int main(int argc, char **argv)
 	//float target1[]={1,0,0}, target2[]={0,1,0} ,target3[]={0,0,1} ;
 	float target1[]={1,-1,-1}, target2[]={-1,1,-1} ,target3[]={-1,-1,1} ;
 	size_t  p ;
-	int max_epo= 20000, input_vec_len = 13;
+	int max_epo= 10000, input_vec_len = 13;
 	int sampling=1;
 	float threshold = 0.0002 ;
 	float min_error = 100 , percentage= 0 , error ,  learnRate = 0.01 ;  //0.01  ;
-	int train_set = ((int)(max_rows*0.5)) ;
+	int train_set = ((int)(max_rows*0.6)) ;
 
 	FILE *nn_data_file = fopen("wine_random.data", "r");
 
@@ -74,25 +74,25 @@ int main(int argc, char **argv)
 		switch ( (int)T[p] )
 		{
 		case 1:
-			error = trainNNetwork_test( neuralNet, &B[p][0], target1 , i );
-			//error = trainNNetwork_resilient( neuralNet, &B[p][0],  target1 , i );
+			//error = trainNNetwork_test( neuralNet, &B[p][0], target1 , i );
+			error = trainNNetwork_final( neuralNet, &B[p][0], target1 , i );
 			break;
 		case 2:
-			error = trainNNetwork_test( neuralNet, &B[p][0], target2 , i );
-			//error = trainNNetwork_resilient( neuralNet, &B[p][0],  target2 , i );
+			//error = trainNNetwork_test( neuralNet, &B[p][0], target2 , i );
+			error = trainNNetwork_final( neuralNet, &B[p][0], target2 , i );
 			break;
 		case 3:
-			error = trainNNetwork_test( neuralNet, &B[p][0], target3 , i );
-			//error = trainNNetwork_resilient( neuralNet, &B[p][0],  target3 , i );
+			//error = trainNNetwork_test( neuralNet, &B[p][0], target3 , i );
+			error = trainNNetwork_final( neuralNet, &B[p][0], target3 , i );
 			break;
 		}
-/*
+
 		if (!(i%neuralNet->sampling)  )
 		{
 			if( error < min_error )
 			{
 				min_error  = error ;
-				//printf("iteration %d  , error=%f\n", i , min_error );
+				printf("iteration %d  , error=%f\n", i , min_error );
 
 				if (min_error <=  threshold)
 					{
@@ -102,7 +102,6 @@ int main(int argc, char **argv)
 
 			}
 		}
-		*/
 
 	}
 	printf("Done training at i = %d ! min_error = %f \t currentERROR = %f \n" ,i, min_error  , error) ;

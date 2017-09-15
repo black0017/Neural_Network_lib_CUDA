@@ -4,14 +4,13 @@
 
 #define t  0.9
 //momentum BPA
-#define momentum 0.7
-
+#define momentum 0.4
 //resilient BPA
-#define h_big      1.1
+#define h_big      1.2
 #define h_little   0.50
 
-#define dmin 0.005
-#define dmax 0.4
+#define dmin 0.001
+#define dmax 1
 //device prototypes
 __device__ float Sigmoid( float x );
 __device__ float Sig_der( float sigmoid_output );
@@ -245,7 +244,7 @@ __global__ void Kernel_back_hidden( float *A , Matrix W , float *Out_current , M
 
 
 //description TODO
-__global__ void Kernel_resilient_last( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , float lrate , Matrix Grad_prev , Matrix Dij , Matrix DW_prev , int counter )
+__global__ void Kernel_resilient_last( float *A ,  Matrix W , float *Out_ff , float *Desired , float *Delta_val , Matrix Grad_prev , Matrix Dij , Matrix DW_prev , int counter )
 {
 
 	int tx =  threadIdx.x;
@@ -274,11 +273,13 @@ __global__ void Kernel_resilient_last( float *A ,  Matrix W , float *Out_ff , fl
 				Dij_new =Minimum( Dij_prev*h_big , dmax )   ;
 				DeltaW = -1*Sign(gradient)*Dij_new ;
 				Grad_prev.elements[ tx*W.width + k] =  gradient ;
+				w_new = w_old + DeltaW ;
 			}
 			else if(temp<0 )
 			{
 				Dij_new =Maximum( (Dij_prev*h_little) , dmin) ;
-				DeltaW  = -1*DW_previous ;
+				DeltaW  = +1*Dij_new ;
+				w_new = w_old - DW_previous ;
 				Grad_prev.elements[ tx*W.width + k] = 0 ;
 			}
 			else
@@ -286,8 +287,9 @@ __global__ void Kernel_resilient_last( float *A ,  Matrix W , float *Out_ff , fl
 				Dij_new =Dij_prev  ;
 				DeltaW = -1*Sign(gradient)*Dij_new ;
 				Grad_prev.elements[ tx*W.width + k] =  gradient ;
+				w_new = w_old + DeltaW ;
 			}
-		w_new = w_old + DeltaW ;
+
 		W.elements[ tx*W.width + k] = w_new;
 		Dij.elements[ tx*W.width + k]  = Dij_new ;
 		DW_prev.elements[ tx*W.width + k] = DeltaW ;
@@ -297,7 +299,7 @@ __global__ void Kernel_resilient_last( float *A ,  Matrix W , float *Out_ff , fl
 //-----------------------------------------------------------------------
 
 
-__global__ void Kernel_relilient_hidden( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , float lrate ,  Matrix Grad_prev , Matrix Dij , Matrix DW_prev  , int counter )
+__global__ void Kernel_relilient_hidden( float *A , Matrix W , float *Out_current , Matrix W_next , float *Out_next , float *Delta_current , float *Delta_next , Matrix Grad_prev , Matrix Dij , Matrix DW_prev  , int counter )
 {
 	int tx =  threadIdx.x;
 	float register DeltaW = 0 ;
@@ -329,28 +331,31 @@ __global__ void Kernel_relilient_hidden( float *A , Matrix W , float *Out_curren
 		previous_level_output = ( ( k==(W.width-1) ) ? 1 :  A[k] )  ;
 		gradient =delta_neuron * previous_level_output ;
 		temp = Mul(gradient , grad_prev ) ;
-			if(temp>0)
-			{
-				Dij_new =Minimum( Dij_prev*h_big , dmax )   ;
-				DeltaW = -1*Sign(gradient)*Dij_new ;
-				Grad_prev.elements[ tx*W.width + k] =  gradient ;
-			}
-			else if(temp<0 )
-			{
-				Dij_new =Maximum( Dij_prev*h_little , dmin) ;
-				DeltaW  = -1*DW_previous ;
-				Grad_prev.elements[ tx*W.width + k] = 0 ;
-			}
-			else
-			{
-				Dij_new =Dij_prev  ;
-				DeltaW = -1*Sign(gradient)*Dij_new ;
-				Grad_prev.elements[ tx*W.width + k] =  gradient ;
-			}
-		w_new = w_old + DeltaW ;
-		W.elements[ tx*W.width + k] = w_new;
-		Dij.elements[ tx*W.width + k]  = Dij_new ;
-		DW_prev.elements[ tx*W.width + k] = DeltaW ;
+					if(temp>0)
+					{
+						Dij_new =Minimum( Dij_prev*h_big , dmax )   ;
+						DeltaW = -1*Sign(gradient)*Dij_new ;
+						Grad_prev.elements[ tx*W.width + k] =  gradient ;
+						w_new = w_old + DeltaW ;
+					}
+					else if(temp<0 )
+					{
+						Dij_new =Maximum( (Dij_prev*h_little) , dmin) ;
+						DeltaW  = +1*Dij_new ;
+						w_new = w_old - DW_previous ;
+						Grad_prev.elements[ tx*W.width + k] = 0 ;
+					}
+					else
+					{
+						Dij_new =Dij_prev  ;
+						DeltaW = -1*Sign(gradient)*Dij_new ;
+						Grad_prev.elements[ tx*W.width + k] =  gradient ;
+						w_new = w_old + DeltaW ;
+					}
+
+				W.elements[ tx*W.width + k] = w_new;
+				Dij.elements[ tx*W.width + k]  = Dij_new ;
+				DW_prev.elements[ tx*W.width + k] = DeltaW ;
 	}
 }
 
@@ -387,8 +392,8 @@ __global__ void Kernel_momentum_last( float *A ,  Matrix W , float *Out_ff , flo
     	dwPrev = dW.elements[ tx*W.width + k];
         w_old = W.elements[ tx*W.width + k] ;
         previous_level_output = ( ( k==(W.width-1) ) ? 1 :  A[k] )  ;
-        DeltaW = -1*delta_neuron * previous_level_output * lrate ;
-        w_new = w_old + momentum*DeltaW + (1-momentum)*dwPrev ;
+        DeltaW = -1*delta_neuron * previous_level_output ;
+        w_new = w_old + lrate*DeltaW + (momentum)*dwPrev ;
         W.elements[ tx*W.width + k] = w_new;
         dW.elements[ tx*W.width + k]= DeltaW ;
     }
@@ -419,8 +424,8 @@ __global__ void Kernel_momentum_hidden( float *A , Matrix W , float *Out_current
     		dwPrev = dW.elements[ tx*W.width + k];
             w_old = W.elements[ tx*W.width + k] ;
             previous_level_output =  (( k==(W.width-1) ) ? 1 :  A[k] )  ;
-            DeltaW = -1*delta_neuron * previous_level_output*lrate ;
-            w_new = w_old + momentum*DeltaW + (1-momentum)*dwPrev ;
+            DeltaW = -1*delta_neuron*previous_level_output ;
+            w_new = w_old + lrate*DeltaW + (momentum)*dwPrev ;
             W.elements[ tx*W.width + k] = w_new;
             dW.elements[ tx*W.width + k]= DeltaW ;
         }
@@ -548,7 +553,7 @@ __device__ float Sign( float x )
 }
 __device__ float Diff( float x , float y )
 {
-	float th= 0.001 ;
+	float th= 0.00001;
 	if (x>=y)
 	{
 		if ( (x-y)<th ) return th ;
@@ -559,7 +564,7 @@ __device__ float Diff( float x , float y )
 }
 __device__ float Mul( float x , float y )
 {
-	float th= 0.001;
+	float th= 0.00001;
 	if (x*y>th)	return +1;
 	else if (x*y<(-1*th)) return -1;
 	else return 0 ;

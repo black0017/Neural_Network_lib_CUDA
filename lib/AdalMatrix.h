@@ -200,17 +200,16 @@ static float SError_vec( float *A , float *B , size_t length)
 	{
 			a = A[i] ;
 			b = B[i] ;
-			error  += 0.5*(a-b)*(a-b) ;
+			error  += (a-b)*(a-b) ;
 	}
-
-	return error ;
+	return (error/2) ;
 }
 static void print_array(const float *A, size_t width, size_t height)
 {
   size_t i , j ;
   for( i = 0; i < height; i++)
   {
-	  printf("row %d results \n", (int)i);
+	  //printf("row %d results \n", (int)i);
     for( j = 0; j < width; j++)
     	printf("%.2f\t", A[i * width + j]);
 
@@ -220,7 +219,7 @@ static void print_array(const float *A, size_t width, size_t height)
 static void print_arrayHeader(const float *A, size_t width, size_t height)
 {
   size_t i , j ;
-  for( i = 0; i < 5; i++)
+  for( i = 0; i < 30; i++)
   {
     for( j = 0; j < width; j++)
     	printf("%.2f\t", A[i * width + j]);

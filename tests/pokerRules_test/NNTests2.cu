@@ -2,7 +2,7 @@
 #include "read_file.h"
 #include <time.h>
 #define ARRAYLEN(x)  (sizeof(x)/sizeof(x[0]))
-#define CLASSES 5
+#define CLASSES 3
 #define VALUE 0.8
 #define VALOW -0.8
 //*************************************************
@@ -54,12 +54,12 @@ int main(int argc, char **argv)
 		}
 	}
 	max_rows=row ;
-	int trainset = max_rows*0.9 ;
+	int trainset = max_rows*0.8 ;
 	fclose(nn_train_data);
 	//preprossecing
 	edit_array(&B[0][0] ,input_vec_len , max_rows ) ;
 
-	NNState *neuralNet1 = initNNState( input_vec_len,  learnRate , max_epo , sampling , CLASSIC  , 2 , 128,  CLASSES ) ;
+	NNState *neuralNet1 = initNNState( input_vec_len,  learnRate , max_epo , sampling , RESILIENT  , 2 , 64,  CLASSES ) ;
 	showInfo(neuralNet1 ,max_rows  );
 
 	copyDataToGpu( neuralNet1 ) ;
@@ -72,11 +72,8 @@ int main(int argc, char **argv)
 
 		target[ idx ] = VALUE;//desired class
 
-		//error = trainNNetwork( neuralNet1, &B[p][0], target , i, NUM_OF_DATA );
-		error = trainNNetwork_test( neuralNet1, &B[p][0], target , i );
-		//error = trainNNetwork_momentum( neuralNet1, &B[p][0], target , i );
-		//error = trainNNetwork_resilient( neuralNet1, &B[p][0],  target , i ); //ready?
-		//error = trainNNetwork_quick( neuralNet1, &B[p][0], target , i );
+		//error = trainNNetwork_test( neuralNet1, &B[p][0], target , i );
+		error = trainNNetwork_final( neuralNet1, &B[p][0], target , i );
 
 		target[ idx  ] = VALOW ;
 		if (!(i%neuralNet1->sampling)  )

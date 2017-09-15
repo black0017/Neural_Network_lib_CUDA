@@ -11,7 +11,7 @@
 #include <cstdarg>
 #include <cassert>
 #include "AdalMatrix.h"
-
+#define d0 0.1
 enum  BPA{ CLASSIC=0 , RESILIENT , ADAPTIVE , MOMENTUM , QUICK  } ;
 
 typedef struct NNState
@@ -38,7 +38,6 @@ typedef struct NNState
 	 */
 	float **ffout;
 
-
 	/* delta_val is the calculated delta value from the equation
 	 * :  --------------------------
 	 * it is used in the backpropagation and is a metric of the error for each neuron in the NN ,
@@ -55,9 +54,6 @@ typedef struct NNState
 	 */
 	int *neurons;
 
-	/*
-	 * no description here :)
-	 */
 	size_t levels;
 
 	size_t max_iterations ;
@@ -90,24 +86,14 @@ void freeNNState(NNState *state);
 void copyDataToGpu( NNState *state ) ;
 void copyDataToCpu( NNState *state   );
 unsigned int isPowOf2(unsigned int x);
-int nextPowOf2( int x);
+unsigned int nextPowOf2( unsigned int x);
 unsigned int isEven(unsigned int x);
-float trainNNetwork(NNState *state, float *input,  float *target , int iteration  );
+
 float trainNNetwork_test(NNState *state, float *input, float *desired , int iteration  ) ;
-float trainNNetwork_momentum(NNState *state, float *input,  float *target , int iteration  );
-float trainNNetwork_resilient(NNState *state, float *input,  float *target , int iteration );
-float trainNNetwork_quick(NNState *state, float *input,  float *desired , int iteration );
-
-float trainNNetwork_old(NNState *state, float *input, size_t input_len, float *desired  ) ;
-
+float trainNNetwork_final(NNState *state, float *input, float *desired , int iteration  );
 float evalNN( NNState *state, float *input, size_t input_len ,  int desired ) ;
-
-
 void dbgPrintNNState(NNState *state);
-void dbgPrintNNState2(NNState *state);
-void dbgPrintNNState3(NNState *state);
 void showInfo( NNState *state , int instances  ) ;
 int NNvar(NNState *state) ;
 void printBPA(BPA e);
-
 #endif /* ADALNN_H_ */
