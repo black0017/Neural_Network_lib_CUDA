@@ -3,7 +3,7 @@ MEng Thesis implemented in 2016-2017 in pure C/CUDA 8.
 Looking backwards, I see a lot of things I didnt know back then.
 In this quick readme I will attempt to distill the usefull lesson from this project.
 
-## Key lesson and intuitions
+## Key lessons and intuitions
 
 ### API
 My approach in the API structure. It is not the best API but from an memory size it has no memory leaks. All the memory is dynamically allocated and freed in the end. It supports only batch size of 1.
