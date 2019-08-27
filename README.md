@@ -30,3 +30,8 @@ The second optimized version of a 'neuron'. Each neuron is a block of threads an
 This should have been a scatter plot, because we only care about the powers of 2, but nothing is perfect :)
 The expiriments were conducted in a NVIDIA GeForce 920M in my laptop.
 ![Alt text](./figures/f7.png?raw=true "title")
+
+
+## Support 
+
+If you like this repo and find it useful, please consider (★) starring it, so that it can reach a broader audience.
