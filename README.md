@@ -6,7 +6,7 @@ In this quick readme I will attempt to distill the usefull lesson from this proj
 ## Key lessons and intuitions
 
 ### API
-My approach in the API structure. It is not the best API but from an memory size it has no memory leaks. All the memory is dynamically allocated and freed in the end. It supports only batch size of 1.
+My approach in the API structure. It was not the best API, but from a memory size perspective, it had no memory leaks. All the memory was dynamically allocated and freed in the end. It supported only batch size of 1.
 ![Alt text](./figures/f1.png?raw=true "title")
 
 ### Implementation 1
